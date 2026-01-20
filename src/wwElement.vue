@@ -212,10 +212,11 @@ export default {
 
       // Only emit event when triggered by user action, not external data changes
       if (emitEvent) {
-        // Always return array of URLs
+        // Always emit as array (even when empty)
+        const eventValue = Array.isArray(currentUrls) ? currentUrls : []
         emit('trigger-event', {
           name: 'images-changed',
-          event: currentUrls,
+          event: eventValue,
         })
       }
     }
@@ -459,12 +460,13 @@ export default {
         }
       }
 
-      // Emit image-removed with current state (same format as images-changed)
+      // Emit image-removed with current state (always array)
       const currentUrls = [...existingImages.value, ...newImages.value]
+      const eventValue = Array.isArray(currentUrls) ? currentUrls : []
 
       emit('trigger-event', {
         name: 'image-removed',
-        event: currentUrls,
+        event: eventValue,
       })
 
       updateVariables()
