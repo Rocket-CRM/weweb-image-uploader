@@ -320,7 +320,7 @@ export default {
           return URL.createObjectURL(file)
         }
         
-        throw new Error('Supabase client not available. Please ensure: 1) Supabase plugin is installed, 2) Project URL and Anon Key are configured, 3) You are logged in if required.')
+        throw new Error('Supabase client not available. Please ensure the Supabase plugin is installed and configured with Project URL and Anon Key.')
       }
 
       const bucketName = props.content?.bucketName || 'images'
