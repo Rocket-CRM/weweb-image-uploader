@@ -129,30 +129,52 @@ export default {
     const getSupabaseClient = () => {
       try {
         // Try multiple paths to find Supabase client
-        // Path 1: wwLib.wwPlugins.supabase
+        // WeWeb plugins can expose the client at different paths depending on version
+        
+        // Path 1: wwLib.wwPlugins.supabase (most common)
         const supabasePlugin = wwLib?.wwPlugins?.supabase
         if (supabasePlugin) {
-          // The client could be at different paths depending on plugin version
+          // Try various property names used by different plugin versions
+          if (supabasePlugin.publicInstance) return supabasePlugin.publicInstance
           if (supabasePlugin.client) return supabasePlugin.client
           if (supabasePlugin.instance) return supabasePlugin.instance
           if (supabasePlugin.supabase) return supabasePlugin.supabase
-          // If plugin exists but client not found, log available keys for debugging
-          console.log('Supabase plugin found, available keys:', Object.keys(supabasePlugin))
+          if (supabasePlugin._client) return supabasePlugin._client
+          // If plugin exists, check if it has a getClient method
+          if (typeof supabasePlugin.getClient === 'function') return supabasePlugin.getClient()
+          // Log available keys for debugging
+          console.log('[ImageUploader] Supabase plugin found, available keys:', Object.keys(supabasePlugin))
         }
         
-        // Path 2: Direct wwLib access
+        // Path 2: wwLib.wwPlugins['ww-supabase'] (alternative plugin name)
+        const wwSupabasePlugin = wwLib?.wwPlugins?.['ww-supabase']
+        if (wwSupabasePlugin) {
+          if (wwSupabasePlugin.publicInstance) return wwSupabasePlugin.publicInstance
+          if (wwSupabasePlugin.client) return wwSupabasePlugin.client
+          console.log('[ImageUploader] ww-supabase plugin found, available keys:', Object.keys(wwSupabasePlugin))
+        }
+        
+        // Path 3: Direct wwLib access
         if (wwLib?.supabase) return wwLib.supabase
         
-        // Path 3: Window-based access
+        // Path 4: Window-based access
         if (typeof window !== 'undefined') {
           if (window.supabase) return window.supabase
           if (window.weweb?.plugins?.supabase?.client) return window.weweb.plugins.supabase.client
+          if (window.weweb?.plugins?.supabase?.publicInstance) return window.weweb.plugins.supabase.publicInstance
         }
         
-        console.warn('Supabase client not found. Available wwLib.wwPlugins:', wwLib?.wwPlugins ? Object.keys(wwLib.wwPlugins) : 'none')
+        // Log all available plugins for debugging
+        const availablePlugins = wwLib?.wwPlugins ? Object.keys(wwLib.wwPlugins) : []
+        console.warn('[ImageUploader] Supabase client not found.')
+        console.warn('[ImageUploader] Available plugins:', availablePlugins)
+        if (supabasePlugin) {
+          console.warn('[ImageUploader] Supabase plugin object:', supabasePlugin)
+        }
+        
         return null
       } catch (e) {
-        console.warn('Error getting Supabase client:', e)
+        console.warn('[ImageUploader] Error getting Supabase client:', e)
         return null
       }
     }
@@ -298,7 +320,7 @@ export default {
           return URL.createObjectURL(file)
         }
         
-        throw new Error('Supabase client not available. Please ensure the Supabase plugin is configured and you are logged in.')
+        throw new Error('Supabase client not available. Please ensure: 1) Supabase plugin is installed, 2) Project URL and Anon Key are configured, 3) You are logged in if required.')
       }
 
       const bucketName = props.content?.bucketName || 'images'
