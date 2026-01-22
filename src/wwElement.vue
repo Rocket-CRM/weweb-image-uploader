@@ -126,55 +126,31 @@ export default {
     const newImages = ref([])
     const removedUrls = ref([])
 
-    const getSupabaseClient = () => {
+    // Get Supabase plugin (for using plugin methods directly)
+    const getSupabasePlugin = () => {
       try {
-        // Try multiple paths to find Supabase client
-        // WeWeb plugins can expose the client at different paths depending on version
-        
-        // Path 1: wwLib.wwPlugins.supabase (most common)
-        const supabasePlugin = wwLib?.wwPlugins?.supabase
-        if (supabasePlugin) {
-          // Try various property names used by different plugin versions
-          if (supabasePlugin.publicInstance) return supabasePlugin.publicInstance
-          if (supabasePlugin.client) return supabasePlugin.client
-          if (supabasePlugin.instance) return supabasePlugin.instance
-          if (supabasePlugin.supabase) return supabasePlugin.supabase
-          if (supabasePlugin._client) return supabasePlugin._client
-          // If plugin exists, check if it has a getClient method
-          if (typeof supabasePlugin.getClient === 'function') return supabasePlugin.getClient()
-          // Log available keys for debugging
-          console.log('[ImageUploader] Supabase plugin found, available keys:', Object.keys(supabasePlugin))
+        const plugin = wwLib?.wwPlugins?.supabase
+        if (plugin && typeof plugin.uploadFile === 'function') {
+          return plugin
         }
-        
-        // Path 2: wwLib.wwPlugins['ww-supabase'] (alternative plugin name)
-        const wwSupabasePlugin = wwLib?.wwPlugins?.['ww-supabase']
-        if (wwSupabasePlugin) {
-          if (wwSupabasePlugin.publicInstance) return wwSupabasePlugin.publicInstance
-          if (wwSupabasePlugin.client) return wwSupabasePlugin.client
-          console.log('[ImageUploader] ww-supabase plugin found, available keys:', Object.keys(wwSupabasePlugin))
-        }
-        
-        // Path 3: Direct wwLib access
-        if (wwLib?.supabase) return wwLib.supabase
-        
-        // Path 4: Window-based access
-        if (typeof window !== 'undefined') {
-          if (window.supabase) return window.supabase
-          if (window.weweb?.plugins?.supabase?.client) return window.weweb.plugins.supabase.client
-          if (window.weweb?.plugins?.supabase?.publicInstance) return window.weweb.plugins.supabase.publicInstance
-        }
-        
-        // Log all available plugins for debugging
-        const availablePlugins = wwLib?.wwPlugins ? Object.keys(wwLib.wwPlugins) : []
-        console.warn('[ImageUploader] Supabase client not found.')
-        console.warn('[ImageUploader] Available plugins:', availablePlugins)
-        if (supabasePlugin) {
-          console.warn('[ImageUploader] Supabase plugin object:', supabasePlugin)
-        }
-        
         return null
       } catch (e) {
-        console.warn('[ImageUploader] Error getting Supabase client:', e)
+        console.warn('[ImageUploader] Error getting Supabase plugin:', e)
+        return null
+      }
+    }
+
+    // Get raw Supabase client (fallback)
+    const getSupabaseClient = () => {
+      try {
+        const supabasePlugin = wwLib?.wwPlugins?.supabase
+        if (supabasePlugin?.instance) return supabasePlugin.instance
+        if (supabasePlugin?.publicInstance) return supabasePlugin.publicInstance
+        if (supabasePlugin?.client) return supabasePlugin.client
+        if (wwLib?.supabase) return wwLib.supabase
+        if (typeof window !== 'undefined' && window.supabase) return window.supabase
+        return null
+      } catch (e) {
         return null
       }
     }
@@ -307,22 +283,6 @@ export default {
     }
 
     const uploadFile = async (file) => {
-      const supabase = getSupabaseClient()
-      
-      if (!supabase) {
-        // Check if we're in local dev mode (serving from localhost)
-        const isLocalDev = typeof window !== 'undefined' && 
-          window.location?.hostname === 'localhost'
-        
-        if (isLocalDev) {
-          // Only use blob URLs in local development
-          console.log('Using local preview (no Supabase in dev mode)')
-          return URL.createObjectURL(file)
-        }
-        
-        throw new Error('Supabase client not available. Please ensure the Supabase plugin is installed and configured with Project URL and Anon Key.')
-      }
-
       const bucketName = props.content?.bucketName || 'images'
       const storagePath = props.content?.storagePath || 'uploads'
       const timestamp = Date.now()
@@ -332,18 +292,54 @@ export default {
         ? storagePath + '/' + timestamp + '_' + random + '_' + safeName 
         : timestamp + '_' + random + '_' + safeName
 
-      const { error } = await supabase.storage.from(bucketName).upload(path, file, {
-        cacheControl: '3600',
-        upsert: false,
-      })
-
-      if (error) {
-        throw error
+      // Method 1: Try using WeWeb Supabase plugin methods directly
+      const plugin = getSupabasePlugin()
+      if (plugin) {
+        console.log('[ImageUploader] Using WeWeb Supabase plugin methods')
+        try {
+          const uploadResult = await plugin.uploadFile(bucketName, path, file, {
+            cacheControl: '3600',
+            upsert: false,
+          })
+          
+          if (uploadResult?.error) {
+            throw new Error(uploadResult.error.message || 'Upload failed')
+          }
+          
+          const urlResult = await plugin.getPublicUrl(bucketName, path)
+          return urlResult?.data?.publicUrl || urlResult?.publicUrl || urlResult
+        } catch (e) {
+          console.warn('[ImageUploader] Plugin method failed, trying raw client:', e)
+        }
       }
 
-      const { data: urlData } = supabase.storage.from(bucketName).getPublicUrl(path)
+      // Method 2: Try using raw Supabase client
+      const supabase = getSupabaseClient()
+      if (supabase) {
+        console.log('[ImageUploader] Using raw Supabase client')
+        const { error } = await supabase.storage.from(bucketName).upload(path, file, {
+          cacheControl: '3600',
+          upsert: false,
+        })
 
-      return urlData?.publicUrl
+        if (error) {
+          throw error
+        }
+
+        const { data: urlData } = supabase.storage.from(bucketName).getPublicUrl(path)
+        return urlData?.publicUrl
+      }
+
+      // Method 3: Local dev mode fallback
+      const isLocalDev = typeof window !== 'undefined' && 
+        window.location?.hostname === 'localhost'
+      
+      if (isLocalDev) {
+        console.log('[ImageUploader] Using local preview (dev mode)')
+        return URL.createObjectURL(file)
+      }
+      
+      throw new Error('Supabase not available. Please ensure the Supabase plugin is installed and configured.')
     }
 
     const handleFileSelect = async (event) => {
@@ -443,33 +439,53 @@ export default {
           console.log('Revoked blob URL')
         } else {
           // Try to delete from Supabase storage
-          const supabase = getSupabaseClient()
           const bucketName = props.content?.bucketName || 'images'
+          const path = extractPathFromUrl(url, bucketName)
           
-          console.log('Attempting to delete from Supabase:', { url, bucketName, hasSupabase: !!supabase })
+          console.log('[ImageUploader] Attempting to delete:', { url, bucketName, path })
           
-          if (supabase) {
-            const path = extractPathFromUrl(url, bucketName)
-            console.log('Extracted path for deletion:', path)
+          if (path) {
+            let deleted = false
             
-            if (path) {
+            // Method 1: Try using WeWeb Supabase plugin methods
+            const plugin = getSupabasePlugin()
+            if (plugin && typeof plugin.deleteFiles === 'function') {
               try {
-                const { data, error } = await supabase.storage.from(bucketName).remove([path])
-                if (error) {
-                  console.error('Supabase delete error:', error)
-                  errorMessage.value = 'Failed to delete: ' + error.message
-                } else {
-                  console.log('Successfully deleted from Supabase:', data)
+                const result = await plugin.deleteFiles(bucketName, [path])
+                if (!result?.error) {
+                  console.log('[ImageUploader] Deleted via plugin:', result)
+                  deleted = true
                 }
               } catch (e) {
-                console.error('Failed to delete file from storage:', e)
-                errorMessage.value = 'Failed to delete: ' + (e.message || 'Unknown error')
+                console.warn('[ImageUploader] Plugin delete failed:', e)
               }
-            } else {
-              console.warn('Could not extract path from URL for deletion')
+            }
+            
+            // Method 2: Try using raw Supabase client
+            if (!deleted) {
+              const supabase = getSupabaseClient()
+              if (supabase) {
+                try {
+                  const { data, error } = await supabase.storage.from(bucketName).remove([path])
+                  if (error) {
+                    console.error('[ImageUploader] Delete error:', error)
+                    errorMessage.value = 'Failed to delete: ' + error.message
+                  } else {
+                    console.log('[ImageUploader] Deleted via client:', data)
+                    deleted = true
+                  }
+                } catch (e) {
+                  console.error('[ImageUploader] Delete failed:', e)
+                  errorMessage.value = 'Failed to delete: ' + (e.message || 'Unknown error')
+                }
+              }
+            }
+            
+            if (!deleted) {
+              console.warn('[ImageUploader] Could not delete - no Supabase access')
             }
           } else {
-            console.warn('Supabase client not available for deletion')
+            console.warn('[ImageUploader] Could not extract path from URL')
           }
         }
 
